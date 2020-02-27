@@ -1,0 +1,52 @@
+language: python
+
+os:
+  - linux
+
+python:
+#  - 3.2
+  - 3.3
+  - 3.4
+  - 3.5
+  - 3.5-dev
+  - 3.6
+  - 3.6-dev
+#  - 3.7-dev
+
+cache: pip
+sudo: false
+
+addons:
+  apt:
+    packages:
+      - build-essential
+      - inotify-tools
+      - python3-dev
+      - libssl-dev
+      - libglib2.0-dev
+      - libdbus-1-dev
+      - libdbus-glib-1-dev
+      - python3-dbus
+
+install:
+  - pip install -U pip
+  - pip3 install -U setuptools
+  - pip3 install requests_mock
+  - pip3 install coverage coveralls pytest codeclimate-test-reporter
+  - python3 setup.py install
+
+before_script:
+  - python3 --version
+
+script:
+  - MOCK_KEYRING=1 python3 -m pytest
+  - MOCK_KEYRING=1 coverage3 run --branch --source=onedrived setup.py test
+
+after_success:
+  - coverage3 report -m
+  - coveralls
+  - CODECLIMATE_REPO_TOKEN=299d832e7f28d822ec417baf31e79973d7d0a0e9225c8fecabf359867e70e67e codeclimate-test-reporter
+  - bash <(curl -s https://codecov.io/bash)
+
+notifications:
+  email: false
