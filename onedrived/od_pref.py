@@ -10,8 +10,8 @@ import keyring
 import tabulate
 
 from . import __version__
-from . import mkdir, get_resource, od_auth, od_i18n
-from .od_models import pretty_api, drive_config
+from . import mkdir, get_resource, od_i18n, od_auth
+from .od_models import pretty_api, drive_config, account_profile
 from .od_api_session import OneDriveAPISession, get_keyring_key
 from .od_models.dict_guard import GuardedDict, exceptions as guard_errors
 from .od_context import load_context, save_context
@@ -49,11 +49,19 @@ def quota_short_str(q):
 
 def print_all_accounts(ctx):
     all_accounts = []
+
     all_account_ids = ctx.all_accounts()
+
     for i, account_id in enumerate(all_account_ids):
         account = ctx.get_account(account_id)
-        all_accounts.append((str(i), account_id, account.account_name, account.account_email))
-    click.echo(tabulate.tabulate(all_accounts, headers=('#', 'Account ID', 'Owner Name', 'Email Address')))
+        if account.account_type == account_profile.AccountTypes.BUSINESS:
+            acc_type = 'Business'
+        else:
+            acc_type = 'Personal'
+
+        all_accounts.append((str(i), account_id, account.account_name, account.account_email, acc_type))
+
+    click.echo(tabulate.tabulate(all_accounts, headers=('#', 'Account ID', 'Owner Name', 'Email Address', 'Profile Type')))
     return all_account_ids
 
 
@@ -101,11 +109,12 @@ def change_account():
 
 def save_account(authenticator):
     try:
-        account_profile = authenticator.get_profile()
-        authenticator.save_session(key=get_keyring_key(account_profile.account_id))
-        context.add_account(account_profile)
+        acc_profile = authenticator.get_profile()
+        k = get_keyring_key(acc_profile.account_id)
+        authenticator.save_session(key=k)
+        context.add_account(acc_profile)
         save_context(context)
-        success(translator['od_pref.save_account.success'].format(profile=account_profile))
+        success(translator['od_pref.save_account.success'].format(profile=acc_profile))
         click.echo()
         click.echo(translator['od_pref.save_account.print_header'].format(context=context))
         click.echo()
@@ -122,10 +131,12 @@ def save_account(authenticator):
 @click.option('--for-business', '-b', is_flag=True, default=False, required=False,
               help=translator['od_pref.authenticate_account.for_business.help'])
 def authenticate_account(get_auth_url=False, code=None, for_business=False):
+
     if for_business:
-        error(translator['od_pref.authenticate_account.for_business_unsupported'])
-        return
-    authenticator = od_auth.OneDriveAuthenticator()
+        authenticator = od_auth.OneDriveBusinessAuthenticator()
+    else:  # personal account
+        authenticator = od_auth.OneDriveAuthenticator()
+
     click.echo(translator['od_pref.authenticate_account.permission_note'])
     if code is None:
         click.echo(translator['od_pref.authenticate_account.paste_url_note'])
@@ -139,6 +150,27 @@ def authenticate_account(get_auth_url=False, code=None, for_business=False):
         if code is None:
             error(translator['od_pref.authenticate_account.error.code_not_found_in_url'])
             return
+
+    # Second authorization for the business accounts
+    if for_business:
+        auth_url = authenticator.authentication_url
+        redirect_url = authenticator.REDIRECT_URL
+        try:
+            # Get user information
+            click.echo(translator['od_pref.authenticate_account.second_authentication'])
+            click.echo(translator['od_pref.authenticate_account.paste_url_note'])
+            click.echo('\n' + click.style(auth_url, underline=True) + '\n')
+            click.echo(translator['od_pref.authenticate_account.paste_url_instruction'].format(
+                redirect_url=click.style(redirect_url, bold=True)))
+            url = click.prompt(
+                translator['od_pref.authenticate_account.paste_url_prompt'],
+                type=str)
+            authenticator.code = extract_qs_param(url, 'code')
+            click.echo()
+        except Exception as e:
+            error(translator[
+                'od_pref.authenticate_account.error.authorization'].format(
+                error_message=str(e)))
 
     try:
         authenticator.authenticate(code)
@@ -190,11 +222,13 @@ def delete_account(yes=False, index=None, email=None, account_id=None):
         if account_id not in all_account_ids:
             error('Account ID "%s" is not found.' % account_id)
             return
-        account = context.get_account(account_id)
-        prompt_text = 'Are you sure to delete account %s?' % account
+        prompt_text = 'Are you sure to delete account %s?' % account_id
         if yes or click.confirm(prompt_text):
             context.delete_account(account_id)
-            keyring.delete_password(OneDriveAPISession.KEYRING_SERVICE_NAME, get_keyring_key(account_id))
+            try:
+                keyring.delete_password(OneDriveAPISession.KEYRING_SERVICE_NAME, get_keyring_key(account_id))
+            except keyring.errors.PasswordDeleteError:
+                pass
             save_context(context)
             success('Successfully deleted account from onedrived.')
         else:
@@ -214,11 +248,19 @@ def print_all_drives():
     for i in context.all_accounts():
         drive_objs = []
         profile = context.get_account(i)
-        authenticator, drives = od_auth.get_authenticator_and_drives(context, i)
+        if profile.account_type == account_profile.AccountTypes.BUSINESS:
+            authenticator, drives = od_auth.get_authenticator_and_drives(context, i)
+        else:
+            authenticator, drives = od_auth.get_authenticator_and_drives(context, i)
         for d in drives:
             drive_objs.append(d)
-            drive_table.append((str(len(drive_table)), profile.account_email,
-                                d.id, d.drive_type, quota_short_str(d.quota), d.status.state))
+            if profile.account_type == account_profile.AccountTypes.BUSINESS:
+                drive_table.append((str(len(drive_table)), profile.account_email,
+                                    d.id, d.drive_type, quota_short_str(d.quota), d.quota.state))
+            else:
+                drive_table.append((str(len(drive_table)), profile.account_email,
+                                    d.id, d.drive_type, quota_short_str(d.quota), d.status.state))
+
         all_drives[i] = (profile, authenticator, drive_objs)
     click.secho(translator['od_pref.print_all_drives.all_drives_table.note'], bold=True)
     click.echo()
@@ -275,23 +317,20 @@ def read_drive_config_interactively(drive_exists, curr_drive_config):
         local_root_default = curr_drive_config.localroot_path
         ignore_file_default = curr_drive_config.ignorefile_path
     else:
-        local_root_default = context.user_home + '/OneDrive'
-        ignore_file_default = context.config_dir + '/' + context.DEFAULT_IGNORE_FILENAME
+        local_root_default = os.path.join(context.user_home, 'OneDrive')
+        ignore_file_default = os.path.join(context.config_dir, context.DEFAULT_IGNORE_FILENAME)
     while local_root is None:
         local_root = click.prompt('Enter the directory path to sync with this Drive',
                                   type=str, default=local_root_default)
         local_root = os.path.abspath(local_root)
         if not os.path.exists(local_root):
-            if click.confirm('Directory "%s" does not exist. Create it?' % local_root):
-                try:
-                    mkdir(local_root, context.user_uid)
-                except OSError as e:
-                    error('OSError: %s' % e)
-                    local_root = None
+            mkdir(local_root, context.user_uid)
         elif not os.path.isdir(local_root):
             error('Path "%s" should be a directory.' % local_root)
             local_root = None
-        elif not click.confirm('Syncing with directory "%s"?' % local_root):
+        elif not click.confirm('Syncing with directory "%s"? Be careful!! If this directory was cleaned '
+                               'recently, all your files will be deleted from cloud. Type Ctrl + C to '
+                               'abort the operation. Do you want to continue?' % local_root):
             local_root = None
     while ignore_file is None:
         ignore_file = click.prompt('Enter the path to ignore file for this Drive',
@@ -356,9 +395,9 @@ def set_drive(drive_id=None, email=None, local_root=None, ignore_file=None):
         curr_drive_config = context.get_drive(drive_id)
 
     click.echo()
-    account_profile = all_drives[account_id][0]
+    acc_profile = all_drives[account_id][0]
     click.echo(click.style(
-        'Going to add/edit Drive "%s" of account "%s"...' % (drive_id, account_profile.account_email), fg='cyan'))
+        'Going to add/edit Drive "%s" of account "%s"...' % (drive_id, acc_profile.account_email), fg='cyan'))
 
     if interactive:
         local_root, ignore_file = read_drive_config_interactively(drive_exists, curr_drive_config)
@@ -392,7 +431,7 @@ def set_drive(drive_id=None, email=None, local_root=None, ignore_file=None):
     d = context.add_drive(drive_config.LocalDriveConfig(drive_id, account_id, ignore_file, local_root))
     save_context(context)
     success('\nSuccessfully configured Drive %s of account %s (%s):' % (
-        d.drive_id, account_profile.account_email, d.account_id))
+        d.drive_id, acc_profile.account_email, d.account_id))
     click.echo('  Local directory: ' + d.localroot_path)
     click.echo('  Ignore file path: ' + d.ignorefile_path)
 
@@ -481,8 +520,6 @@ def set_config(key, value):
         error(translator[str_key].format(key=e.key, path=e.value))
     except OSError as e:
         error(translator['configurator.error_generic'].format(key=key, error_message=str(e)))
-    except:
-        raise
 
 
 if __name__ == '__main__':

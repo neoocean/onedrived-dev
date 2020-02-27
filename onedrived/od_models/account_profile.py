@@ -1,4 +1,10 @@
-class OneDriveAccountProfile:
+
+class AccountTypes:
+    PERSONAL = 0
+    BUSINESS = 1
+
+
+class OneDriveAccount:
 
     def __init__(self, data):
         self.data = data
@@ -21,4 +27,47 @@ class OneDriveAccountProfile:
 
     @property
     def account_email(self):
-        return self.data['emails']['account']
+        return self.data['emails']
+
+    def get_account(self):
+        if self.data['account_type'] == AccountTypes.BUSINESS:
+            return OneDriveAccountBusiness(self.data)
+        else:
+            return OneDriveAccountPersonal(self.data)
+
+
+class OneDriveAccountPersonal(OneDriveAccount):
+
+    def __init__(self, data):
+        super().__init__(data)
+        self.account_type = AccountTypes.PERSONAL
+
+    @property
+    def account_email(self):
+        return super().account_email['account']
+
+    def get_account(self):
+        raise AttributeError("'OneDriveAccountPersonal' object has no attribute 'get_account'")
+
+
+class OneDriveAccountBusiness(OneDriveAccount):
+
+    def __init__(self, data):
+        super().__init__(data)
+        self.account_type = AccountTypes.BUSINESS
+
+    @property
+    def account_root_folder(self):
+        return self.data['webUrl']
+
+    @property
+    def tenant(self):
+        site = self.account_root_folder
+        return site[8:site.find('-my.sharepoint.com/')]  # 8 is the len of 'https://'
+
+    @property
+    def endpoint(self):
+        return 'https://' + self.tenant + '-my.sharepoint.com/'
+
+    def get_account(self):
+        raise AttributeError("'OneDriveAccountPersonal' object has no attribute 'get_account'")

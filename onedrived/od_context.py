@@ -52,7 +52,7 @@ class UserContext:
         'webhook_port': 0,
         'webhook_renew_interval_sec': 7200,  # Renew webhook every 2 hours.
         'webhook_action_delay_sec': 120,
-        'num_workers': 2,
+        'num_workers': 1,
         'start_delay_sec': 0,
         'logfile_path': ''
     }
@@ -136,10 +136,11 @@ class UserContext:
         """
         Return profile of a saved account.
         :param str account_id: ID of the account to query.
-        :return od_models.account_profile.OneDriveAccountProfile:
-            An OneDriveAccountProfile object of the account profile.
+        :return od_models.account_profile.OneDriveAccount:
+            An OneDriveAccount object of the account profile.
         """
-        return _account_profile.OneDriveAccountProfile(self.config['accounts'][account_id])
+        account = account_profile.OneDriveAccount(self.config['accounts'][account_id])
+        return account.get_account()
 
     def delete_account(self, account_id):
         """
