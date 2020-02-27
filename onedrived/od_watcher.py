@@ -3,9 +3,19 @@ import os
 import threading
 
 import onedrivesdk.error
-from inotify_simple import flags as _inotify_flags, masks as _inotify_masks, INotify as _INotify
+from inotify_simple import (
+    flags as _inotify_flags,
+    masks as _inotify_masks,
+    INotify as _INotify,
+)
 
-from .od_tasks import delete_item, move_item, merge_dir, update_mtime, upload_file
+from .od_tasks import (
+    delete_item,
+    move_item,
+    merge_dir,
+    update_mtime,
+    upload_file,
+)
 from .od_models.path_filter import PathFilter
 from .od_models.bidict import loosebidict
 from .od_api_helper import item_request_call
@@ -351,7 +361,7 @@ class LocalRepositoryWatcher:
 
         if repo.path_filter.should_ignore(item_path, is_dir=event_isdir):
             logging.info('Ignored %s on path "%s" by path filter. Flags={%s}.',
-                            str(ev), parent_dir + '/' + ev.name, ','.join([str(f) for f in flags]))
+                         str(ev), parent_dir + '/' + ev.name, ','.join([str(f) for f in flags]))
             return
 
         if event_isdir and (_inotify_flags.MOVED_FROM in flags or _inotify_flags.DELETE in flags):
