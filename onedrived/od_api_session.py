@@ -4,6 +4,8 @@ import zlib
 from time import time
 
 import keyring
+import keyring.backend
+from keyrings.alt.file import PlaintextKeyring
 import onedrivesdk.session
 
 
@@ -26,6 +28,7 @@ class OneDriveAPISession(onedrivesdk.session.Session):
         if self.SESSION_ARG_KEYNAME not in save_session_kwargs:
             raise ValueError('"%s" must be specified in save_session() argument.' % self.SESSION_ARG_KEYNAME)
         data = base64.b64encode(zlib.compress(pickle.dumps(self, self.PICKLE_PROTOCOL))).decode('utf-8')
+        keyring.set_keyring(PlaintextKeyring())
         keyring.set_password(self.KEYRING_SERVICE_NAME, save_session_kwargs[self.SESSION_ARG_KEYNAME], data)
 
     @staticmethod
@@ -37,6 +40,7 @@ class OneDriveAPISession(onedrivesdk.session.Session):
         keyarg = OneDriveAPISession.SESSION_ARG_KEYNAME
         if keyarg not in load_session_kwargs:
             raise ValueError('"%s" must be specified in load_session() argument.' % keyarg)
+        keyring.set_keyring(PlaintextKeyring())
         saved_data = keyring.get_password(OneDriveAPISession.KEYRING_SERVICE_NAME, load_session_kwargs[keyarg])
 
         if saved_data is None:
